@@ -1,0 +1,524 @@
+#include <MS5611.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_MMC56x3.h>
+#include <Adafruit_ADXL345_U.h>
+#include <SD.h>
+#include <USBHost_t36.h>
+#include <Wire.h>
+MS5611 MS5611(0x77);
+Adafruit_MPU6050 mpu;
+Adafruit_MMC5603 mmc = Adafruit_MMC5603(12345); //Assign a unique ID to this sensor
+Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified();
+
+USBHost USB_SER;
+USBHub hub1(USB_SER);
+USBSerial_BigBuffer USB_serial(USB_SER, 1); // Handles anything up to 512 bytes
+
+const float seapres = 1013.25; // Don't mess with this
+const int pinone = 13;
+const int pintwo = 13;
+const int pinbuzz = 9;
+float maxalt = 0;
+float maxvel = 0;
+float maxveldescend = 0;
+float maxpres = 0;
+float maxpresdescend = 0;
+float maxGs = 0;
+double height = 500;
+bool executed = false;
+bool timerchecker = false;
+bool maxpoint = false;
+bool onetimefunctionrun = false;
+unsigned long stopwatch;
+
+const float timeInterval = 0.02; // Delta time
+float A[2][2] = {{1, timeInterval}, {0, 1}};
+float H[2][2] = {{1, 0}, {0, 1}};
+float Q[2][2] = {{1, 0}, {0, 3}};
+float R[2][2] = {{10, 0}, {0, 10}};
+float x[2][1] = {0, 20};
+float P[2][2] = {{5, 0}, {0, 5}};
+
+unsigned long ignitiondelay = 500;
+unsigned long currenttime;
+unsigned long backup;
+unsigned long backupingbackup;
+
+File file;
+
+void setup()
+{
+    USB_SER.begin();
+
+    Serial.begin(115200);
+    Serial.println("System initializing...");
+    Wire.begin();
+    if (MS5611.begin() == true)
+    {
+      Serial.println("MS5611 found.");
+    }
+    else
+    {
+      Serial.println("MS5611 not found. halt.");
+      while (1);
+    }
+    if (mpu.begin() == true)
+    {
+      Serial.println("MPU6050 found.");
+    }
+    else
+    {
+      Serial.println("MPU6050 not found. halt.");
+      while (1);
+    }
+    if (mmc.begin(MMC56X3_DEFAULT_ADDRESS, &Wire) == true)
+    {
+      Serial.println("MMC56X3 found.");
+    }
+    else
+    {
+      Serial.println("MMC56X3 not found. halt.");
+      while (1);
+    }
+    if (accel.begin() == true)
+    {
+      Serial.println("ADXL345 found.");
+    }
+    else
+    {
+      Serial.println("ADXL345 not found. halt.");
+      while (1);
+    }
+    mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    Serial.print("Gyro range set to: +-500 deg/s\n");
+    file.print("Gyro range set to: +-500 deg/s\n");
+    mpu.setFilterBandwidth(MPU6050_BAND_5_HZ);
+    Serial.print("Filter bandwidth set to: 5Hz\n");
+    file.print("Filter bandwidth set to: 5Hz\n");
+
+    mmc.printSensorDetails();
+
+    if (!SD.begin(BUILTIN_SDCARD))
+    {
+      Serial.println("initialization failed!");
+      return;
+    }
+    Serial.println("initialization done.");
+    if(!file)
+    {
+      Serial.println("failure to open file");
+    }
+
+    pinMode(pinone, OUTPUT);
+    pinMode(pintwo, OUTPUT);
+}
+
+void loop()
+{
+  file = SD.open("rocket.txt", FILE_WRITE);
+  MS5611.read();
+  currenttime = millis();
+  double temp = MS5611.getTemperature();
+  double pres = MS5611.getPressure();
+  
+  // Write to file and serial monitor
+
+  Serial.print("\tTemperature: ");
+  file.print("Temperature: ");
+  Serial.print(temp);
+  file.print(temp, 2);
+
+  Serial.print("\tPressure: ");
+  file.print("\tPressure: ");
+  Serial.print(pres);
+  file.print(pres, 2);
+
+  // Calculates altitute from smoothened temp and pres
+  float alt = getAltitude(temp, pres);
+  KalmanFilter(alt);
+
+  Serial.print("\tAltitude: ");
+  file.print("\tAltitude: ");
+  Serial.print(alt);
+  file.print(alt, 2);
+
+  float filtalt = x[0][0]; // Filtered altitude
+
+  Serial.print("Filtered Altitude: ");
+  file.print("Filtered Altitude: ");
+  Serial.println(x[0][0]);
+  file.println(x[0][0]);
+
+  float filtvel = x[0][1]; // Filtered velocity
+
+  Serial.print("Velocity: ");
+  file.print("Velocity: ");
+  Serial.println(x[0][1]);
+  file.println(x[0][1]);
+
+  Serial.println();
+  file.println();
+
+  //Gyro
+
+  sensors_event_t acc, gyr, temps;
+  mpu.getEvent(&acc, &gyr, &temps);
+
+  Serial.print("Acceleration X: ");
+  file.print("Acceleration X: ");
+  Serial.print(acc.acceleration.x);
+  file.print(acc.acceleration.x);
+  Serial.print(", Y: ");
+  file.print(", Y: ");
+  Serial.print(acc.acceleration.y);
+  file.print(acc.acceleration.y);
+  Serial.print(", Z: ");
+  file.print(", Z: ");
+  Serial.print(acc.acceleration.z);
+  file.print(acc.acceleration.z);
+  Serial.println(" m/s^2");
+  file.println(" m/s^2");
+
+  Serial.print("Rotation X: ");
+  file.print("Rotation X: ");
+  Serial.print(gyr.gyro.x);
+  file.print(gyr.gyro.x);
+  Serial.print(", Y: ");
+  file.print(", Y: ");
+  Serial.print(gyr.gyro.y);
+  file.print(gyr.gyro.y);
+  Serial.print(", Z: ");
+  file.print(", Z: ");
+  Serial.print(gyr.gyro.z);
+  file.print(gyr.gyro.z);
+  Serial.println(" rad/s");
+  file.println(" rad/s");
+
+  // Magnet
+
+  sensors_event_t event;
+  mmc.getEvent(&event);
+
+  Serial.print("X: ");
+  file.print("X: ");
+  Serial.print(event.magnetic.x);
+  file.print(event.magnetic.x);
+  Serial.print("  ");
+  file.print("  ");
+  Serial.print("Y: ");
+  file.print("Y: ");
+  Serial.print(event.magnetic.y);
+  file.print(event.magnetic.y);
+  Serial.print("  ");
+  file.print("  ");
+  Serial.print("Z: ");
+  file.print("Z: ");
+  Serial.print(event.magnetic.z);
+  file.print(event.magnetic.z);
+  Serial.print("  ");
+  file.print("  ");
+  Serial.println("uT");
+  file.println("uT");
+
+  //Accel
+
+  sensors_event_t newevent; 
+  accel.getEvent(&newevent);
+
+  Serial.print("X: ");
+  file.print("X: "); 
+  Serial.print(event.acceleration.x); 
+  file.print(event.acceleration.x);
+  Serial.print("  ");
+  file.print("  ");
+  Serial.print("Y: "); 
+  file.print("Y: "); 
+  Serial.print(event.acceleration.y); 
+  file.print(event.acceleration.y); 
+  Serial.print("  ");
+  file.print("  ");
+  Serial.print("Z: "); 
+  file.print("Z: "); 
+  Serial.print(event.acceleration.z); 
+  file.print(event.acceleration.z); 
+  Serial.print("  ");
+  file.print("  ");
+  Serial.println("m/s^2 ");
+  file.println("m/s^2 ");
+
+  if ((x[0][1] == 0) && (acc == 0))
+  {
+    maxpoint = true;
+  }
+  
+  // Delay thingy for parachute 1
+  
+  if(currenttime>6000) // Puts a delay for 6 seconds of launch
+  {
+    if(executed == false)
+    {
+      backup = currenttime;
+    }
+    
+    // Delay thingy for parachute 2
+    
+    if(executed == true)
+    {
+      backupingbackup = currenttime;
+    }
+    
+    // PARACHUTE 1 DEPLOYEMENT
+    
+    if(filtalt < maxalt) // Checks if altitude is decreasing
+    {
+      if (maxpoint == true) // Checks if velocity is zero
+      {
+        if(timerchecker == false) // Stopwatch starts
+        {
+          stopwatch = currenttime;
+          timerchecker = true;
+        }
+        
+        if(executed == false && (currenttime - stopwatch == 800)) // If stopwatch reaches 800 milliseconds execute deploy thing. This is to make sure that altitude is decreasing for 800 milliseconds and that it's just not a noise spike
+        {
+          digitalWrite(pinone, HIGH);
+          if (currenttime - backup >= ignitiondelay) // This is to make sure that ignition charge is set for 500 milliseconds
+          {
+            digitalWrite(pinone, LOW);
+            Serial.print("\nDROGUE DEPLOYED\n");
+            file.print("\nDROGUE DEPLOYED\n");
+            executed = true;
+          }
+        }
+      }
+    
+    // Maximum altitude updater
+    
+    else if(filtalt >= maxalt)
+    {
+      maxalt = filtalt;
+    }
+    
+    // PARACHUTE 2 DEPLOYEMENT
+    
+    if(filtalt <= height && executed == true)
+    {
+      digitalWrite(pintwo, HIGH);
+      if (currenttime - backupingbackup >= ignitiondelay)
+      {
+        digitalWrite(pinone, LOW);
+        Serial.print("\tMAIN PARACHUTE DEPLOYED\n");
+        file.print("\tMAIN PARACHUTE DEPLOYED\n");
+        executed = false;
+      }
+    }
+  }
+
+  // Buzzer
+  
+  digitalWrite(pinbuzz, HIGH);
+  digitalWrite(pinbuzz, LOW);
+  digitalWrite(pinbuzz, HIGH);
+
+  // Rocket Top SPEED ascend
+  if (filtalt < maxalt)
+  {
+    if(filtvel >= maxvel)
+    {
+      maxvel = filtvel;
+    }
+  }
+
+  // Rocket Top SPEED descend
+  if (filtalt < maxalt)
+  {
+    if(filtvel >= maxveldescend)
+    {
+      maxveldescend = filtvel;
+    }
+  }
+
+  // Rocket Top G
+  if (filtalt < maxalt)
+  {
+    if(acc >= maxGs)
+    {
+      maxGs = acc;
+    }
+  }
+
+  // Rocket Top Pres ascend
+  if (filtalt < maxalt)
+  {
+    if(filtvel >= maxpres)
+    {
+      maxpres = filtvel;
+    }
+  }
+
+  // Rocket Top Pres descend
+  if (filtalt < maxalt)
+  {
+    if(filtvel >= maxpresdescend)
+    {
+      maxpresdescend = filtvel;
+    }
+  }
+
+  if (filtalt<height && filtvel == 0)
+  {
+    onetimefunctionrun == true;
+    concludingstatements(maxvel, maxveldescend, maxGs, maxpres, maxpresdescend, maxalt);
+  }
+  
+  delay(100);
+}
+
+void concludingstatements(float maxvel, float maxveldescend, float maxGs, float maxpres, float maxpresdescend, float maxalt)
+{
+  Serial.print("TOP SPEED: ");
+  file.print("TOP SPEED: ");
+  Serial.print(maxvel);
+  file.print(maxvel);
+  Serial.print("TOP SPEED (DESCEND): ");
+  file.print("TOP SPEED (DESCEND): "); 
+  Serial.print(maxveldescend);
+  file.print(maxveldescend);
+  Serial.print("TOP ACCELERATION: ");
+  file.print("TOP ACCELERATION: ");
+  Serial.print(maxGs);
+  file.print(maxGs);
+  Serial.print("TOP PRESSURE: ");
+  file.print("TOP PRESSURE: ");
+  Serial.print(maxpres);
+  file.print(maxpres);
+  Serial.print("TOP PRESSURE (DESCEND): ");
+  file.print("TOP PRESSURE (DESCEND): ");
+  Serial.print(maxpresdescend);
+  file.print(maxpresdescend);
+  Serial.print("MAX HEIGHT: ");
+  file.print("MAX HEIGHT: ");
+  Serial.print(maxalt);
+  file.print(maxalt);
+}
+
+double getAltitude(double temp, double pres) // Calculates altitude from temperature and pressure
+{
+  return (((pow((seapres/pres),(1 / 5.257))-1)*(temp+273.15))/0.0065);
+}
+
+void KalmanFilter(float z)
+{
+  //prediction of x
+  float xpred[2][1];
+  matrixMultiply(A, x, xpred, 1, 2, 2);
+
+  //prediction of error covariance
+  float Ppred[2][2];
+  float At[2][2];
+  matrixMultiply(A, P, Ppred, 2, 2, 2);
+  matrixTranspose(A, At);
+  matrixMultiply(Ppred, At, Ppred, 2, 2, 2);
+  matrixAdd(Ppred, Q, Ppred, 2, 2);
+  
+  //Kalman Gain
+  float K[2][2];
+  float Ht[2][2];
+  matrixTranspose(H, Ht);
+  float temp[2][2];
+  matrixMultiply(H, Ppred, temp, 2, 2, 2);
+  matrixMultiply(temp, Ht, temp, 2, 2, 2);
+  matrixAdd(temp, R, temp, 2, 2);
+  float tempinv[2][2];
+  matrixInverse(temp, tempinv);
+  matrixMultiply(Ppred, Ht, K, 2, 2, 2);
+  matrixMultiply(K, temp, K, 2, 2, 2);
+
+  //estimate of x
+  float zmatrix[2][1];
+  zmatrix[0][0] = z - xpred[0][0];
+  zmatrix[1][0] = 0;
+  float temptwo[2][1];
+  matrixMultiply(H, xpred, temptwo, 2, 2, 1);
+  matrixSubtract(zmatrix, temptwo, temptwo, 2, 2);
+  matrixMultiply(K, temptwo, temptwo, 2, 2, 1);
+  matrixAdd(xpred, temptwo, x, 2, 2);
+
+  //estimate of error covariance
+  float tempthree[2][2];
+  matrixMultiply(K, H, tempthree, 2, 2, 2);
+  matrixMultiply(tempthree, Ppred, tempthree, 2, 2, 2);
+  matrixSubtract(Ppred, tempthree, P, 2, 2);
+}
+
+void matrixAdd(float a[][2], float b[][2], float result[][2], int m, int n)
+ {
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < n; j++) {
+      result[i][j] = a[i][j] + b[i][j];
+    }
+  }
+}
+void matrixAdd(float a[][1], float b[][1], float result[][1], int m, int n)
+ {
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < n; j++) {
+      result[i][j] = a[i][j] + b[i][j];
+    }
+  }
+}
+void matrixSubtract(float a[][2], float b[][2], float result[][2], int m, int n)
+ {
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < n; j++) {
+      result[i][j] = a[i][j] - b[i][j];
+    }
+  }
+}
+void matrixSubtract(float a[][1], float b[][1], float result[][1], int m, int n)
+ {
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < n; j++) {
+      result[i][j] = a[i][j] - b[i][j];
+    }
+  }
+}
+void matrixMultiply(float a[][2], float b[][2], float result[][2], int m, int n, int p) 
+{
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < p; j++) {
+      result[i][j] = 0;
+      for (int k = 0; k < n; k++) {
+        result[i][j] += a[i][k] * b[k][j];
+      }
+    }
+  }
+}
+void matrixMultiply(float a[][2], float b[][1], float result[][1], int m, int n, int p) 
+{
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < p; j++) {
+      result[i][j] = 0;
+      for (int k = 0; k < n; k++) {
+        result[i][j] += a[i][k] * b[k][j];
+      }
+    }
+  }
+}
+void matrixTranspose(float matrix[][2], float result[][2])
+ {
+  for (int i = 0; i < 2; i++) {
+    for (int j = 0; j < 2; j++) {
+      result[j][i] = matrix[i][j];
+    }
+  }
+}
+void matrixInverse(float matrix[][2], float result[][2]) 
+{
+  float determinant = matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+  result[0][0] = matrix[1][1] / determinant;
+  result[0][1] = -matrix[0][1] / determinant;
+  result[1][0] = -matrix[1][0] / determinant;
+  result[1][1] = matrix[0][0] / determinant;
+}
