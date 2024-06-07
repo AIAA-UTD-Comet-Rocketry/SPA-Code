@@ -119,8 +119,8 @@ void loop()
   file = SD.open("rocket.txt", FILE_WRITE);
   MS5611.read();
   currenttime = millis();
-  double temp = MS5611.getTemperature();
-  double pres = MS5611.getPressure();
+  float temp = MS5611.getTemperature();
+  float pres = MS5611.getPressure();
   
   // Write to file and serial monitor
 
@@ -247,7 +247,7 @@ void loop()
   Serial.println("m/s^2 ");
   file.println("m/s^2 ");
 
-  if ((x[0][1] == 0) && (acc == 0))
+  if ((x[0][1] == 0) && (acc.acceleration.x == 0 && acc.acceleration.y == 0 && acc.acceleration.z == 0))
   {
     maxpoint = true;
   }
@@ -292,6 +292,7 @@ void loop()
           }
         }
       }
+    }
     
     // Maximum altitude updater
     
@@ -342,9 +343,9 @@ void loop()
   // Rocket Top G
   if (filtalt < maxalt)
   {
-    if(acc >= maxGs)
+    if(acc.acceleration.z >= maxGs)
     {
-      maxGs = acc;
+      maxGs = acc.acceleration.z;
     }
   }
 
@@ -375,6 +376,11 @@ void loop()
   delay(100);
 }
 
+float getAltitude(float temp, float pres) // Calculates altitude from temperature and pressure
+{
+  return (((pow((seapres/pres),(1 / 5.257))-1)*(temp+273.15))/0.0065);
+}
+
 void concludingstatements(float maxvel, float maxveldescend, float maxGs, float maxpres, float maxpresdescend, float maxalt)
 {
   Serial.print("TOP SPEED: ");
@@ -401,11 +407,6 @@ void concludingstatements(float maxvel, float maxveldescend, float maxGs, float 
   file.print("MAX HEIGHT: ");
   Serial.print(maxalt);
   file.print(maxalt);
-}
-
-double getAltitude(double temp, double pres) // Calculates altitude from temperature and pressure
-{
-  return (((pow((seapres/pres),(1 / 5.257))-1)*(temp+273.15))/0.0065);
 }
 
 void KalmanFilter(float z)
