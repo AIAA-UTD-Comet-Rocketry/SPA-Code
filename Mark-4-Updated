@@ -36,7 +36,7 @@ float A[2][2] = {{1, timeInterval}, {0, 1}};
 float H[2][2] = {{1, 0}, {0, 1}};
 float Q[2][2] = {{1, 0}, {0, 3}};
 float R[2][2] = {{10, 0}, {0, 10}};
-float x[2][1] = {0, 20};
+float x[2][1] = {0, 20}; // ERRORRRRRRRRRRRR --------------------------------------------------------------------------------------------------------------------
 float P[2][2] = {{5, 0}, {0, 5}};
 
 unsigned long ignitiondelay = 500;
@@ -148,12 +148,12 @@ void loop()
   Serial.println(x[0][0]);
   file.println(x[0][0]);
 
-  float filtvel = x[0][1]; // Filtered velocity
+  float filtvel = x[0][1]; // Filtered velocity // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
 
   Serial.print("Velocity: ");
   file.print("Velocity: ");
-  Serial.println(x[0][1]);
-  file.println(x[0][1]);
+  Serial.println(x[0][1]);// ERRORRRRRRRRRRRR --------------------------------------------------------------------------------------------------------------------
+  file.println(x[0][1]); // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------------------------------
 
   Serial.println();
   file.println();
@@ -245,7 +245,7 @@ void loop()
   Serial.println("m/s^2 ");
   file.println("m/s^2 ");
 
-  if ((x[0][1] == 0) && (acc.acceleration.x == 0 && acc.acceleration.y == 0 && acc.acceleration.z == 0))
+  if ((x[0][1] == 0) && (acc.acceleration.x == 0 && acc.acceleration.y == 0 && acc.acceleration.z == 0)) /// ERRORRRRRRRRRRRR ---------------------------------------------------
   {
     maxpoint = true;
   }
@@ -367,7 +367,7 @@ void loop()
 
   if (filtalt<height && filtvel == 0)
   {
-    onetimefunctionrun == true;
+    onetimefunctionrun = true;
     concludingstatements(maxvel, maxveldescend, maxGs, maxpres, maxpresdescend, maxalt);
   }
   
@@ -410,7 +410,7 @@ void concludingstatements(float maxvel, float maxveldescend, float maxGs, float 
 void KalmanFilter(float z)
 {
   //prediction of x
-  float xpred[2][1];
+  float xpred[2][1]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
   matrixMultiply(A, x, xpred, 1, 2, 2);
 
   //prediction of error covariance
@@ -435,10 +435,10 @@ void KalmanFilter(float z)
   matrixMultiply(K, temp, K, 2, 2, 2);
 
   //estimate of x
-  float zmatrix[2][1];
+  float zmatrix[2][1]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
   zmatrix[0][0] = z - xpred[0][0];
   zmatrix[1][0] = 0;
-  float temptwo[2][1];
+  float temptwo[2][1]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
   matrixMultiply(H, xpred, temptwo, 2, 2, 1);
   matrixSubtract(zmatrix, temptwo, temptwo, 2, 2);
   matrixMultiply(K, temptwo, temptwo, 2, 2, 1);
@@ -463,7 +463,7 @@ void matrixAdd(float a[][1], float b[][1], float result[][1], int m, int n)
  {
   for (int i = 0; i < m; i++) {
     for (int j = 0; j < n; j++) {
-      result[i][j] = a[i][j] + b[i][j];
+      result[i][j] = a[i][j] + b[i][j]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
     }
   }
 }
@@ -479,7 +479,7 @@ void matrixSubtract(float a[][1], float b[][1], float result[][1], int m, int n)
  {
   for (int i = 0; i < m; i++) {
     for (int j = 0; j < n; j++) {
-      result[i][j] = a[i][j] - b[i][j];
+      result[i][j] = a[i][j] - b[i][j]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
     }
   }
 }
@@ -497,10 +497,10 @@ void matrixMultiply(float a[][2], float b[][2], float result[][2], int m, int n,
 void matrixMultiply(float a[][2], float b[][1], float result[][1], int m, int n, int p) 
 {
   for (int i = 0; i < m; i++) {
-    for (int j = 0; j < p; j++) {
+    for (int j = 0; j < p; j++) { // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
       result[i][j] = 0;
       for (int k = 0; k < n; k++) {
-        result[i][j] += a[i][k] * b[k][j];
+        result[i][j] += a[i][k] * b[k][j]; // ERRORRRRRRRRRRRR ---------------------------------------------------------------------------------------------
       }
     }
   }
